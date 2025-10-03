@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == 'admin';
+    }
+    function isOwner(resourceData) {
+      return isSignedIn() && resourceData.userId == request.auth.uid;
+    }
+
+    match /roles/{uid} {
+      // 本人は自分の roles ドキュメントを読める。管理者も読める。
+      allow read: if (request.auth != null && request.auth.uid == uid) || isAdmin();
+      allow write: if false;    // 役割付与は手動で
+    }
+
+    match /bookings/{slotId} {
+      allow read: if isSignedIn();
+
+      // 作成：自分の予約のみ（userId が本人）
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+
+      // 更新：キャンセルは本人 or 管理者のみ。status フィールドのみ許可
+      allow update: if (isOwner(resource.data) || isAdmin()) &&
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['status']);
+
+      // 削除は管理者のみ
+      allow delete: if isAdmin();
+    }
+  }
+}
